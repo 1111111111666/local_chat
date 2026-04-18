@@ -1,0 +1,294 @@
+<!-- python -m http.server 8080 -->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Локальный чат</title>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #e5e5e5;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .chat-container {
+            max-width: 600px;
+            width: 100%;
+            height: 100%;
+            max-height: 700px;
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Экран входа */
+        .join-screen {
+            padding: 30px;
+            text-align: center;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .join-screen h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        
+        .join-screen input {
+            padding: 12px 15px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            font-size: 16px;
+            width: 100%;
+        }
+        
+        .join-screen button {
+            padding: 12px 30px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        
+        .join-screen .info {
+            font-size: 12px;
+            color: #888;
+            margin-top: 20px;
+        }
+        
+        /* Экран чата */
+        .chat-screen {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        .status-bar {
+            padding: 10px 15px;
+            background: #e9ecef;
+            font-size: 12px;
+            text-align: center;
+            color: #666;
+        }
+        
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            background: #fafafa;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+        }
+        
+        .message .name {
+            font-weight: 600;
+            color: #0066cc;
+        }
+        
+        .message .time {
+            font-size: 10px;
+            color: #999;
+            margin-left: 8px;
+        }
+        
+        .message .text {
+            margin-top: 4px;
+            word-wrap: break-word;
+        }
+        
+        .system-message {
+            text-align: center;
+            font-size: 11px;
+            color: #888;
+            font-style: italic;
+            margin: 10px 0;
+        }
+        
+        .input-area {
+            display: flex;
+            padding: 12px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            gap: 8px;
+        }
+        
+        .input-area input {
+            flex: 1;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            font-size: 14px;
+        }
+        
+        .input-area button {
+            padding: 10px 20px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .status-connected {
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        .status-disconnected {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <!-- Экран входа -->
+    <div id="joinScreen" class="join-screen">
+        <h2>💬 Локальный чат</h2>
+        <p>Введите IP-адрес сервера:</p>
+        <input type="text" id="serverIp" placeholder="Например: 192.168.43.100">
+        <input type="text" id="userName" placeholder="Ваше имя">
+        <button id="joinBtn">Войти в чат</button>
+        <div class="info">
+            🔗 Подключитесь к Wi-Fi, который раздаёт хост<br>
+            📡 IP-адрес вам скажет хост (тот, у кого ноутбук)
+        </div>
+    </div>
+    
+    <!-- Экран чата -->
+    <div id="chatScreen" class="chat-screen">
+        <div class="status-bar" id="statusBar">⏳ Подключение к серверу...</div>
+        <div class="messages" id="messages"></div>
+        <div class="input-area">
+            <input type="text" id="messageInput" placeholder="Сообщение..." autocomplete="off">
+            <button id="sendBtn">➤</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let ws = null;
+    let userName = '';
+    let serverIp = '';
+    
+    // Добавление сообщения в чат
+    function addMessage(data) {
+        const messagesDiv = document.getElementById('messages');
+        const div = document.createElement('div');
+        
+        if (data.type === 'system') {
+            div.className = 'system-message';
+            div.innerHTML = `${data.time} — ${data.text}`;
+        } else {
+            div.className = 'message';
+            div.innerHTML = `
+                <span class="name">${escapeHtml(data.name)}</span>
+                <span class="time">${data.time}</span>
+                <div class="text">${escapeHtml(data.text)}</div>
+            `;
+        }
+        
+        messagesDiv.appendChild(div);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+    
+    // Защита от XSS (простая)
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Подключение к WebSocket серверу
+    function connect() {
+        const wsUrl = `ws://${serverIp}:8765`;
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+            document.getElementById('statusBar').innerHTML = '✅ Подключено к серверу | Соединение установлено';
+            document.getElementById('statusBar').className = 'status-bar status-connected';
+            ws.send(JSON.stringify({type: 'join', name: userName}));
+        };
+        
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            addMessage(data);
+        };
+        
+        ws.onclose = () => {
+            document.getElementById('statusBar').innerHTML = '❌ Соединение потеряно. Обновите страницу.';
+            document.getElementById('statusBar').className = 'status-bar status-disconnected';
+        };
+        
+        ws.onerror = () => {
+            document.getElementById('statusBar').innerHTML = '⚠️ Ошибка подключения. Проверьте IP и Wi-Fi.';
+        };
+    }
+    
+    // Обработка входа
+    document.getElementById('joinBtn').onclick = () => {
+        serverIp = document.getElementById('serverIp').value.trim();
+        userName = document.getElementById('userName').value.trim();
+        
+        if (!serverIp) {
+            alert('Введите IP-адрес сервера (его показывает хост)');
+            return;
+        }
+        
+        if (!userName) {
+            alert('Введите ваше имя');
+            return;
+        }
+        
+        // Переключаемся на экран чата
+        document.getElementById('joinScreen').style.display = 'none';
+        document.getElementById('chatScreen').style.display = 'flex';
+        
+        // Подключаемся
+        connect();
+    };
+    
+    // Отправка сообщения
+    document.getElementById('sendBtn').onclick = () => {
+        const input = document.getElementById('messageInput');
+        const text = input.value.trim();
+        
+        if (text && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({type: 'message', text: text}));
+            input.value = '';
+        }
+    };
+    
+    // Отправка по Enter
+    document.getElementById('messageInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('sendBtn').click();
+        }
+    });
+</script>
+</body>
+</html>
